@@ -1,0 +1,971 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+
+// ==========================================
+// 1. THEME & COLORS
+// ==========================================
+class AppColors {
+  static const Color background = Color(0xFF1A1A1A);
+  static const Color surface = Color(0xFF262626);
+  static const Color surfaceLight = Color(0xFF333333);
+  static const Color green = Color(0xFF2ECC71);
+  static const Color yellow = Color(0xFFFFD86A);
+  static const Color red = Color(0xFFE74C3C);
+  static const Color textLight = Color(0xFFF5F5F5);
+  static const Color textMuted = Color(0xFF9E9E9E);
+}
+
+// ==========================================
+// 2. OFFLINE HIVE MODELS & ADAPTERS
+// ==========================================
+class Sale {
+  final String id;
+  final String item;
+  final double amount;
+  final String paymentMethod;
+  final DateTime date;
+
+  Sale({required this.id, required this.item, required this.amount, required this.paymentMethod, required this.date});
+}
+
+class SaleAdapter extends TypeAdapter<Sale> {
+  @override
+  final int typeId = 20;
+
+  @override
+  Sale read(BinaryReader reader) {
+    return Sale(
+      id: reader.readString(),
+      item: reader.readString(),
+      amount: reader.readDouble(),
+      paymentMethod: reader.readString(),
+      date: DateTime.parse(reader.readString()),
+    );
+  }
+
+  @override
+  void write(BinaryWriter writer, Sale obj) {
+    writer.writeString(obj.id);
+    writer.writeString(obj.item);
+    writer.writeDouble(obj.amount);
+    writer.writeString(obj.paymentMethod);
+    writer.writeString(obj.date.toIso8601String());
+  }
+}
+
+class Expense {
+  final String id;
+  final String category;
+  final double amount;
+  final String wallet;
+  final String? receiptPath;
+  final DateTime date;
+
+  Expense({required this.id, required this.category, required this.amount, required this.wallet, this.receiptPath, required this.date});
+}
+
+class ExpenseAdapter extends TypeAdapter<Expense> {
+  @override
+  final int typeId = 21;
+
+  @override
+  Expense read(BinaryReader reader) {
+    return Expense(
+      id: reader.readString(),
+      category: reader.readString(),
+      amount: reader.readDouble(),
+      wallet: reader.readString(),
+      receiptPath: reader.read() as String?,
+      date: DateTime.parse(reader.readString()),
+    );
+  }
+
+  @override
+  void write(BinaryWriter writer, Expense obj) {
+    writer.writeString(obj.id);
+    writer.writeString(obj.category);
+    writer.writeDouble(obj.amount);
+    writer.writeString(obj.wallet);
+    writer.write(obj.receiptPath);
+    writer.writeString(obj.date.toIso8601String());
+  }
+}
+
+class SavingGoal {
+  final String id;
+  final String name;
+  final double targetAmount;
+  final double currentAmount;
+  final DateTime deadline;
+
+  SavingGoal({required this.id, required this.name, required this.targetAmount, required this.currentAmount, required this.deadline});
+}
+
+class SavingGoalAdapter extends TypeAdapter<SavingGoal> {
+  @override
+  final int typeId = 22;
+
+  @override
+  SavingGoal read(BinaryReader reader) {
+    return SavingGoal(
+      id: reader.readString(),
+      name: reader.readString(),
+      targetAmount: reader.readDouble(),
+      currentAmount: reader.readDouble(),
+      deadline: DateTime.parse(reader.readString()),
+    );
+  }
+
+  @override
+  void write(BinaryWriter writer, SavingGoal obj) {
+    writer.writeString(obj.id);
+    writer.writeString(obj.name);
+    writer.writeDouble(obj.targetAmount);
+    writer.writeDouble(obj.currentAmount);
+    writer.writeString(obj.deadline.toIso8601String());
+  }
+}
+
+// ==========================================
+// 3. WIDGETS (EL UPWARD ARROW & FOOTER)
+// ==========================================
+class ElLogo extends StatelessWidget {
+  final double size;
+  const ElLogo({super.key, this.size = 48});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(size: Size(size, size), painter: _ElPainter());
+  }
+}
+
+class _ElPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = size.width * 0.14;
+    final paintG = Paint()..color = AppColors.green..strokeWidth = stroke..strokeCap = StrokeCap.round..style = PaintingStyle.stroke;
+    final paintY = Paint()..color = AppColors.yellow..strokeWidth = stroke..strokeCap = StrokeCap.round..style = PaintingStyle.stroke;
+
+    Path pathE = Path()
+      ..moveTo(size.width * 0.25, size.height * 0.8)
+      ..lineTo(size.width * 0.25, size.height * 0.25)
+      ..lineTo(size.width * 0.55, size.height * 0.25);
+
+    Path pathL = Path()
+      ..moveTo(size.width * 0.50, size.height * 0.40)
+      ..lineTo(size.width * 0.50, size.height * 0.80)
+      ..lineTo(size.width * 0.85, size.height * 0.80);
+
+    Path arrow = Path()
+      ..moveTo(size.width * 0.65, size.height * 0.35)
+      ..lineTo(size.width * 0.85, size.height * 0.15)
+      ..lineTo(size.width * 0.85, size.height * 0.40);
+
+    canvas.drawPath(pathE, paintG);
+    canvas.drawPath(pathL, paintY);
+    canvas.drawPath(arrow, paintG);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class KitweFooter extends StatelessWidget {
+  const KitweFooter({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 16.0),
+      child: Center(
+        child: Text(
+          'Built with ❤️ in Kitwe',
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted, letterSpacing: 0.5),
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 4. MAIN & DATABASE INITIALIZATION
+// ==========================================
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
+  await Hive.initFlutter();
+  Hive.registerAdapter(SaleAdapter());
+  Hive.registerAdapter(ExpenseAdapter());
+  Hive.registerAdapter(SavingGoalAdapter());
+
+  await Hive.openBox<Sale>('sales_box');
+  await Hive.openBox<Expense>('expenses_box');
+  await Hive.openBox<SavingGoal>('savings_box');
+
+  runApp(const EasyLifeApp());
+}
+
+class EasyLifeApp extends StatelessWidget {
+  const EasyLifeApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'EASY LIFE',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        scaffoldBackgroundColor: AppColors.background,
+        primaryColor: AppColors.green,
+        colorScheme: const ColorScheme.dark(primary: AppColors.green, secondary: AppColors.yellow, surface: AppColors.surface, error: AppColors.red),
+        textTheme: GoogleFonts.poppinsTextTheme(ThemeData.dark().textTheme),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: AppColors.surface,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: AppColors.green, width: 2)),
+        ),
+      ),
+      home: const SplashScreen(),
+    );
+  }
+}
+
+// ==========================================
+// 5. SPLASH SCREEN (3 SECONDS)
+// ==========================================
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> {
+  @override
+  void initState() {
+    super.initState();
+    Timer(const Duration(seconds: 3), () {
+      if (mounted) {
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const PinLockScreen()));
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Column(
+          children: [
+            const Spacer(flex: 3),
+            const ElLogo(size: 84),
+            const SizedBox(height: 16),
+            const Text('EASY LIFE', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: AppColors.green, letterSpacing: 2)),
+            const SizedBox(height: 6),
+            const Text('Your daily money, made easy.', style: TextStyle(fontSize: 13, color: AppColors.yellow)),
+            const Spacer(flex: 2),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 24),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.surfaceLight)),
+              child: Column(
+                children: const [
+                  Text('Easy Life - Created by SEFANIA MULENGA\nfrom Kitwe, Zambia - 2026', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, height: 1.4, color: AppColors.textLight)),
+                  SizedBox(height: 8),
+                  Text('WhatsApp: 0763692564', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.green)),
+                ],
+              ),
+            ),
+            const Spacer(flex: 2),
+            const KitweFooter(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 6. PIN LOCK SCREEN (PIN: 1234)
+// ==========================================
+class PinLockScreen extends StatefulWidget {
+  const PinLockScreen({super.key});
+
+  @override
+  State<PinLockScreen> createState() => _PinLockScreenState();
+}
+
+class _PinLockScreenState extends State<PinLockScreen> {
+  String _enteredPin = '';
+
+  void _key(String d) {
+    if (_enteredPin.length < 4) {
+      setState(() => _enteredPin += d);
+      if (_enteredPin.length == 4) {
+        if (_enteredPin == '1234') {
+          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Incorrect PIN. Default is 1234.')));
+          setState(() => _enteredPin = '');
+        }
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 28),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const ElLogo(size: 50),
+              const SizedBox(height: 12),
+              const Text('EASY LIFE', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: AppColors.green)),
+              const SizedBox(height: 4),
+              const Text('Enter 4-Digit Security PIN', style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(4, (i) => Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 10),
+                  width: 16, height: 16,
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: i < _enteredPin.length ? AppColors.green : AppColors.surfaceLight),
+                )),
+              ),
+              const SizedBox(height: 40),
+              Table(
+                children: [
+                  TableRow(children: [_btn('1'), _btn('2'), _btn('3')]),
+                  TableRow(children: [_btn('4'), _btn('5'), _btn('6')]),
+                  TableRow(children: [_btn('7'), _btn('8'), _btn('9')]),
+                  TableRow(children: [
+                    const SizedBox(),
+                    _btn('0'),
+                    IconButton(icon: const Icon(Icons.backspace_outlined, color: AppColors.yellow), onPressed: () {
+                      if (_enteredPin.isNotEmpty) setState(() => _enteredPin = _enteredPin.substring(0, _enteredPin.length - 1));
+                    }),
+                  ]),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _btn(String t) {
+    return InkWell(
+      onTap: () => _key(t),
+      customBorder: const CircleBorder(),
+      child: Container(height: 60, alignment: Alignment.center, child: Text(t, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold))),
+    );
+  }
+}
+
+// ==========================================
+// 7. SCREEN 1: HOME SCREEN
+// ==========================================
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final sBox = Hive.box<Sale>('sales_box');
+    final eBox = Hive.box<Expense>('expenses_box');
+    final gBox = Hive.box<SavingGoal>('savings_box');
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          children: const [
+            ElLogo(size: 26),
+            SizedBox(width: 8),
+            Text('EASY LIFE', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.textLight)),
+          ],
+        ),
+        actions: [
+          IconButton(icon: const Icon(Icons.info_outline), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutScreen()))),
+          IconButton(icon: const Icon(Icons.business_center, color: AppColors.yellow), onPressed: () => _accGate(context)),
+        ],
+      ),
+      body: ValueListenableBuilder(
+        valueListenable: sBox.listenable(),
+        builder: (context, Box<Sale> sales, _) {
+          return ValueListenableBuilder(
+            valueListenable: eBox.listenable(),
+            builder: (context, Box<Expense> expenses, _) {
+              final now = DateTime.now();
+              final todaySales = sales.values.where((s) => s.date.day == now.day && s.date.month == now.month && s.date.year == now.year).toList();
+              final todayExpenses = expenses.values.where((e) => e.date.day == now.day && e.date.month == now.month && e.date.year == now.year).toList();
+
+              final sumSales = todaySales.fold(0.0, (sum, s) => sum + s.amount);
+              final sumExpenses = todayExpenses.fold(0.0, (sum, e) => sum + e.amount);
+              final profit = sumSales - sumExpenses;
+              final isProfit = profit >= 0;
+
+              return SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Top Card: Today's Profit
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: isProfit ? AppColors.green : AppColors.red, width: 2),
+                      ),
+                      child: Column(
+                        children: [
+                          const Text("Today's Profit (Sales - Expenses)", style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                          const SizedBox(height: 6),
+                          Text('K ${profit.toStringAsFixed(2)}', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: isProfit ? AppColors.green : AppColors.red)),
+                          const SizedBox(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            children: [
+                              Column(children: [const Text('Sales', style: TextStyle(fontSize: 11, color: AppColors.textMuted)), Text('K ${sumSales.toStringAsFixed(2)}', style: const TextStyle(color: AppColors.green, fontWeight: FontWeight.bold))]),
+                              Container(width: 1, height: 26, color: AppColors.surfaceLight),
+                              Column(children: [const Text('Expenses', style: TextStyle(fontSize: 11, color: AppColors.textMuted)), Text('K ${sumExpenses.toStringAsFixed(2)}', style: const TextStyle(color: AppColors.red, fontWeight: FontWeight.bold))]),
+                            ],
+                          )
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Middle: Savings Progress
+                    ValueListenableBuilder(
+                      valueListenable: gBox.listenable(),
+                      builder: (context, Box<SavingGoal> gb, _) {
+                        final goals = gb.values.toList();
+                        double totalTarget = goals.fold(0.0, (s, g) => s + g.targetAmount);
+                        double totalSaved = goals.fold(0.0, (s, g) => s + g.currentAmount);
+                        double progress = totalTarget > 0 ? (totalSaved / totalTarget).clamp(0.0, 1.0) : 0.0;
+
+                        return Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(18)),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Savings Goal Progress', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)), Text('${(progress * 100).toStringAsFixed(0)}%', style: const TextStyle(color: AppColors.yellow, fontWeight: FontWeight.bold))]),
+                              const SizedBox(height: 8),
+                              ClipRRect(borderRadius: BorderRadius.circular(6), child: LinearProgressIndicator(value: progress, minHeight: 8, backgroundColor: AppColors.surfaceLight, valueColor: const AlwaysStoppedAnimation(AppColors.yellow))),
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(8)),
+                                child: const Row(children: [Icon(Icons.lightbulb, size: 16, color: AppColors.yellow), SizedBox(width: 6), Text('Save K100 today = K3000 in 30 days', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600))]),
+                              )
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 16),
+
+                    // 3 Buttons
+                    Row(
+                      children: [
+                        Expanded(child: _actionBtn('Add Sale', Icons.add_shopping_cart, AppColors.green, Colors.black, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AddSaleScreen())))),
+                        const SizedBox(width: 8),
+                        Expanded(child: _actionBtn('Add Expense', Icons.receipt_long, AppColors.red, Colors.white, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AddExpenseScreen())))),
+                        const SizedBox(width: 8),
+                        Expanded(child: _actionBtn('Savings', Icons.savings, AppColors.yellow, Colors.black, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SavingsScreen())))),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    const Text("Today's Activity", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                    const SizedBox(height: 8),
+                    if (todaySales.isEmpty && todayExpenses.isEmpty)
+                      Container(height: 80, alignment: Alignment.center, child: const Text('No records today yet. Tap Add Sale!', style: TextStyle(color: AppColors.textMuted)))
+                    else
+                      ...[
+                        ...todaySales.map((s) => _tile(s.item, '${s.paymentMethod} • ${DateFormat('hh:mm a').format(s.date)}', '+ K ${s.amount.toStringAsFixed(2)}', AppColors.green, true)),
+                        ...todayExpenses.map((e) => _tile(e.category, '${e.wallet} • ${DateFormat('hh:mm a').format(e.date)}', '- K ${e.amount.toStringAsFixed(2)}', AppColors.red, false)),
+                      ],
+                    const KitweFooter(),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _actionBtn(String label, IconData icon, Color bg, Color tc, VoidCallback tap) {
+    return InkWell(
+      onTap: tap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
+        child: Column(children: [Icon(icon, color: tc, size: 22), const SizedBox(height: 4), Text(label, style: TextStyle(color: tc, fontWeight: FontWeight.bold, fontSize: 11))]),
+      ),
+    );
+  }
+
+  Widget _tile(String t, String sub, String amt, Color c, bool isSale) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12)),
+      child: ListTile(
+        leading: CircleAvatar(backgroundColor: c.withOpacity(0.15), child: Icon(isSale ? Icons.arrow_downward : Icons.arrow_upward, color: c, size: 18)),
+        title: Text(t, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+        subtitle: Text(sub, style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
+        trailing: Text(amt, style: TextStyle(color: c, fontWeight: FontWeight.bold, fontSize: 14)),
+      ),
+    );
+  }
+
+  void _accGate(BuildContext context) {
+    final c = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Accountant Portal'),
+        content: TextField(controller: c, decoration: const InputDecoration(hintText: 'Enter code: ACC'), textAlign: TextAlign.center),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellow),
+            onPressed: () {
+              if (c.text.trim().toUpperCase() == 'ACC' || c.text.trim() == '1234') {
+                Navigator.pop(ctx);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountantDashboard()));
+              }
+            },
+            child: const Text('OPEN', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          )
+        ],
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 8. SCREEN 2: ADD SALE (VOICE INPUT & METHODS)
+// ==========================================
+class AddSaleScreen extends StatefulWidget {
+  const AddSaleScreen({super.key});
+
+  @override
+  State<AddSaleScreen> createState() => _AddSaleScreenState();
+}
+
+class _AddSaleScreenState extends State<AddSaleScreen> {
+  final _itemCtrl = TextEditingController();
+  final _amtCtrl = TextEditingController();
+  String _method = 'Cash';
+  final SpeechToText _speech = SpeechToText();
+  bool _isListening = false;
+
+  void _listen() async {
+    if (!_isListening) {
+      if (await _speech.initialize()) {
+        setState(() => _isListening = true);
+        _speech.listen(onResult: (v) => setState(() => _itemCtrl.text = v.recognizedWords));
+      }
+    } else {
+      setState(() => _isListening = false);
+      _speech.stop();
+    }
+  }
+
+  void _save() {
+    final amt = double.tryParse(_amtCtrl.text) ?? 0.0;
+    if (_itemCtrl.text.isNotEmpty && amt > 0) {
+      final sale = Sale(id: DateTime.now().millisecondsSinceEpoch.toString(), item: _itemCtrl.text.trim(), amount: amt, paymentMethod: _method, date: DateTime.now());
+      Hive.box<Sale>('sales_box').add(sale);
+      Navigator.pop(context);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Add Sale')),
+      body: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            TextField(
+              controller: _itemCtrl,
+              decoration: InputDecoration(
+                labelText: 'Item Sold',
+                suffixIcon: IconButton(icon: Icon(_isListening ? Icons.mic : Icons.mic_none, color: _isListening ? AppColors.red : AppColors.green), onPressed: _listen),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(controller: _amtCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount (ZMW)', prefixText: 'K ')),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<String>(
+              value: _method,
+              dropdownColor: AppColors.surface,
+              decoration: const InputDecoration(labelText: 'Payment Method'),
+              items: ['Cash', 'MTN', 'Airtel', 'Zamtel'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+              onChanged: (v) => setState(() => _method = v!),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.green, minimumSize: const Size.fromHeight(50)),
+              onPressed: _save,
+              child: const Text('SAVE SALE', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            ),
+            const Spacer(),
+            const KitweFooter(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 9. SCREEN 3: ADD EXPENSE (PHOTO RECEIPT)
+// ==========================================
+class AddExpenseScreen extends StatefulWidget {
+  const AddExpenseScreen({super.key});
+
+  @override
+  State<AddExpenseScreen> createState() => _AddExpenseScreenState();
+}
+
+class _AddExpenseScreenState extends State<AddExpenseScreen> {
+  final _amtCtrl = TextEditingController();
+  String _category = 'Stock';
+  String _wallet = 'Cash';
+  File? _receipt;
+
+  void _pick(ImageSource src) async {
+    final img = await ImagePicker().pickImage(source: src, imageQuality: 60);
+    if (img != null) setState(() => _receipt = File(img.path));
+  }
+
+  void _save() {
+    final amt = double.tryParse(_amtCtrl.text) ?? 0.0;
+    if (amt > 0) {
+      final exp = Expense(id: DateTime.now().millisecondsSinceEpoch.toString(), category: _category, amount: amt, wallet: _wallet, receiptPath: _receipt?.path, date: DateTime.now());
+      Hive.box<Expense>('expenses_box').add(exp);
+      Navigator.pop(context);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Add Expense')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            DropdownButtonFormField<String>(
+              value: _category,
+              dropdownColor: AppColors.surface,
+              decoration: const InputDecoration(labelText: 'Category'),
+              items: ['Stock', 'Transport', 'Airtime', 'Food', 'Rent', 'Other'].map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+              onChanged: (v) => setState(() => _category = v!),
+            ),
+            const SizedBox(height: 14),
+            TextField(controller: _amtCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount Paid (ZMW)', prefixText: 'K ')),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<String>(
+              value: _wallet,
+              dropdownColor: AppColors.surface,
+              decoration: const InputDecoration(labelText: 'Wallet'),
+              items: ['Cash', 'MoMo'].map((w) => DropdownMenuItem(value: w, child: Text(w))).toList(),
+              onChanged: (v) => setState(() => _wallet = v!),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Receipt Photo (Optional)', style: TextStyle(fontWeight: FontWeight.w600)),
+                Row(children: [
+                  IconButton(icon: const Icon(Icons.camera_alt, color: AppColors.yellow), onPressed: () => _pick(ImageSource.camera)),
+                  IconButton(icon: const Icon(Icons.photo, color: AppColors.yellow), onPressed: () => _pick(ImageSource.gallery)),
+                ]),
+              ],
+            ),
+            if (_receipt != null) Image.file(_receipt!, height: 120, fit: BoxFit.cover),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.red, minimumSize: const Size.fromHeight(50)),
+              onPressed: _save,
+              child: const Text('RECORD EXPENSE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(height: 30),
+            const KitweFooter(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 10. SCREEN 4: SAVINGS & SMART ADVISOR
+// ==========================================
+class SavingsScreen extends StatelessWidget {
+  const SavingsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final gBox = Hive.box<SavingGoal>('savings_box');
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Savings & Advisor')),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: AppColors.yellow,
+        child: const Icon(Icons.add, color: Colors.black),
+        onPressed: () {
+          final n = TextEditingController();
+          final t = TextEditingController();
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: AppColors.surface,
+              title: const Text('Create Goal'),
+              content: Column(mainAxisSize: MainAxisSize.min, children: [
+                TextField(controller: n, decoration: const InputDecoration(labelText: 'Goal Name')),
+                const SizedBox(height: 10),
+                TextField(controller: t, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Target (K)')),
+              ]),
+              actions: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.yellow),
+                  onPressed: () {
+                    final target = double.tryParse(t.text) ?? 0.0;
+                    if (n.text.isNotEmpty && target > 0) {
+                      gBox.add(SavingGoal(id: DateTime.now().toString(), name: n.text, targetAmount: target, currentAmount: 0, deadline: DateTime.now().add(const Duration(days: 30))));
+                      Navigator.pop(ctx);
+                    }
+                  },
+                  child: const Text('SAVE', style: TextStyle(color: Colors.black)),
+                )
+              ],
+            ),
+          );
+        },
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.yellow)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('Smart Advisor: If you have K1000', style: TextStyle(color: AppColors.yellow, fontWeight: FontWeight.bold, fontSize: 15)),
+                  SizedBox(height: 8),
+                  Text('• Keep Working Float: K1000', style: TextStyle(fontSize: 12)),
+                  Text('• Reinvest 40% Profit: K1400 potential', style: TextStyle(fontSize: 12)),
+                  Text('• Daily Save K50: K2500 in 30 days', style: TextStyle(fontSize: 12)),
+                  SizedBox(height: 6),
+                  Text('Safe Disclaimer: Estimates for guidance only.', style: TextStyle(fontSize: 10, color: AppColors.textMuted, fontStyle: FontStyle.italic)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text('Your Active Goals', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 10),
+            ValueListenableBuilder(
+              valueListenable: gBox.listenable(),
+              builder: (context, Box<SavingGoal> box, _) {
+                return ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: box.length,
+                  itemBuilder: (context, i) {
+                    final g = box.getAt(i)!;
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                            Text(g.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            IconButton(icon: const Icon(Icons.add_circle, color: AppColors.green), onPressed: () {
+                              final dep = TextEditingController();
+                              showDialog(context: context, builder: (ctx) => AlertDialog(
+                                backgroundColor: AppColors.surface,
+                                title: Text('Deposit to ${g.name}'),
+                                content: TextField(controller: dep, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount (K)')),
+                                actions: [
+                                  ElevatedButton(onPressed: () {
+                                    final val = double.tryParse(dep.text) ?? 0.0;
+                                    if (val > 0) {
+                                      box.putAt(i, SavingGoal(id: g.id, name: g.name, targetAmount: g.targetAmount, currentAmount: g.currentAmount + val, deadline: g.deadline));
+                                      Navigator.pop(ctx);
+                                    }
+                                  }, child: const Text('DEPOSIT'))
+                                ],
+                              ));
+                            })
+                          ]),
+                          Text('Saved: K ${g.currentAmount.toStringAsFixed(0)} / Target: K ${g.targetAmount.toStringAsFixed(0)}', style: const TextStyle(fontSize: 12, color: AppColors.yellow)),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+            const KitweFooter(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 11. SCREEN 5: ACCOUNTANT DASHBOARD & ZRA PDF
+// ==========================================
+class AccountantDashboard extends StatelessWidget {
+  const AccountantDashboard({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final sales = Hive.box<Sale>('sales_box').values.toList();
+    final expenses = Hive.box<Expense>('expenses_box').values.toList();
+
+    double tSales = sales.fold(0.0, (s, i) => s + i.amount);
+    double tExp = expenses.fold(0.0, (s, i) => s + i.amount);
+    double profit = tSales - tExp;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Accountant Dashboard')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14)),
+              child: const Text('Client: Kalingalinga Spices (Owner: Mwansa Banda)', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppColors.red.withOpacity(0.2), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.red)),
+              child: const Text('Mismatch Alert: K500 missing between Cash & MoMo ledger.', style: TextStyle(color: AppColors.red, fontWeight: FontWeight.bold, fontSize: 12)),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16)),
+              child: Column(
+                children: [
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Total Sales'), Text('K ${tSales.toStringAsFixed(2)}', style: const TextStyle(color: AppColors.green, fontWeight: FontWeight.bold))]),
+                  const SizedBox(height: 6),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Total Expenses'), Text('K ${tExp.toStringAsFixed(2)}', style: const TextStyle(color: AppColors.red, fontWeight: FontWeight.bold))]),
+                  const Divider(),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Net Profit', style: TextStyle(fontWeight: FontWeight.bold)), Text('K ${profit.toStringAsFixed(2)}', style: TextStyle(color: profit >= 0 ? AppColors.green : AppColors.red, fontWeight: FontWeight.bold))]),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.green, padding: const EdgeInsets.symmetric(vertical: 14)),
+              icon: const Icon(Icons.picture_as_pdf, color: Colors.black),
+              label: const Text('TAX READY REPORT (ZRA PDF)', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              onPressed: () async {
+                final pdf = pw.Document();
+                pdf.addPage(pw.Page(build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                  pw.Text('EASY LIFE - ZRA TAX REPORT', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+                  pw.Divider(),
+                  pw.Text('Shop: Kalingalinga Spices | Owner: Mwansa Banda'),
+                  pw.SizedBox(height: 10),
+                  pw.Text('Gross Sales: K ${tSales.toStringAsFixed(2)}'),
+                  pw.Text('Expenses: K ${tExp.toStringAsFixed(2)}'),
+                  pw.Text('Net Profit: K ${profit.toStringAsFixed(2)}'),
+                  pw.Text('Est. 4% ZRA Turnover Tax: K ${(tSales * 0.04).toStringAsFixed(2)}'),
+                  pw.Spacer(),
+                  pw.Divider(),
+                  pw.Center(child: pw.Text('Created by SEFANIA MULENGA • Kitwe, Zambia - 2026', style: const pw.TextStyle(fontSize: 10))),
+                ])));
+                await Printing.sharePdf(bytes: await pdf.save(), filename: 'ZRA_Tax_Report.pdf');
+              },
+            ),
+            const KitweFooter(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 12. SCREEN 6: ABOUT SCREEN
+// ==========================================
+class AboutScreen extends StatelessWidget {
+  const AboutScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('About')),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            const ElLogo(size: 64),
+            const SizedBox(height: 12),
+            const Text('EASY LIFE', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: AppColors.green)),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16)),
+              child: Column(
+                children: [
+                  const Text('Founder: SEFANIA MULENGA', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const Text('Kitwe, Zambia - 2026', style: TextStyle(color: AppColors.yellow, fontSize: 13)),
+                  const SizedBox(height: 12),
+                  InkWell(
+                    onTap: () {
+                      Clipboard.setData(const ClipboardData(text: '0763692564'));
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('WhatsApp: 0763692564 copied!')));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(8)),
+                      child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.chat, color: AppColors.green, size: 18), SizedBox(width: 8), Text('WhatsApp: 0763692564', style: TextStyle(fontWeight: FontWeight.bold))]),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Spacer(),
+            const KitweFooter(),
+          ],
+        ),
+      ),
+    );
+  }
+}

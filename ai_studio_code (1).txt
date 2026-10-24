@@ -1,0 +1,16 @@
+// In main.dart
+import 'splash_screen.dart'; // import the new splash screen
+
+class EasyLifeApp extends StatelessWidget {
+  const EasyLifeApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'EASY LIFE',
+      debugShowCheckedModeBanner: false,
+      theme: easyLifeTheme,
+      home: const SplashScreen(), // Starts with the 3s branded Splash Screen
+    );
+  }
+}

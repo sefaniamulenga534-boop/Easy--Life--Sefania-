@@ -1,0 +1,23 @@
+easy_life/
+├── pubspec.yaml
+└── lib/
+    ├── main.dart
+    ├── theme/
+    │   └── app_theme.dart
+    ├── widgets/
+    │   ├── el_logo.dart
+    │   └── kitwe_footer.dart
+    ├── models/
+    │   ├── sale.dart
+    │   ├── expense.dart
+    │   └── saving_goal.dart
+    ├── services/
+    │   └── hive_service.dart
+    └── screens/
+        ├── splash_screen.dart
+        ├── home_screen.dart
+        ├── add_sale_screen.dart
+        ├── add_expense_screen.dart
+        ├── savings_screen.dart
+        ├── accountant_dashboard.dart
+        └── about_screen.dart
